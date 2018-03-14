@@ -1,29 +1,80 @@
-from suds.client import Client
-from icat.ids import IDSClient
+from icat.client import Client
+import time
+import zipfile
+import os
+import StringIO
+import urllib2
 
-client = Client(#Your ICAT WSDL URL here) #Get the WSDL file for SOAP. Currently uses the ICAT instance for public Diamond data
-icat = client.service
-factory = client.factory
+#This function copies infile to outfile:
+def copyfile(infile, outfile, chunksize=8192):
+   
+    while True:
+        chunk = infile.read(chunksize)
+        if not chunk:
+            break
+        outfile.write(chunk)
 
-#Get a session ID:
-credentials = factory.create("login.credentials")
-entry = factory.create("login.credentials.entry")
-entry.key = "username"
-entry.value = #Your FedID here
-credentials.entry.append(entry)
-entry = factory.create("login.credentials.entry")
-entry.key = "password"
-entry.value = #Your password here
-credentials.entry.append(entry)
-sessionId = icat.login("ldap", credentials) 
-print(sessionId)
+#Downloads a dataset given the ID:
+def downloadDataset(datasetId):
+	preparedId = myClient.prepareData({"Datasets":[datasetId]})
+	print("preparedId:")
+	print(preparedId)
+	
+	isPrepared = False
+	while (isPrepared == False):
+		print(isPrepared)
+		isPrepared = myClient.isDataPrepared(preparedId)
+		time.sleep(30)
 
-#Search for all datasets and display the first one:
-search = icat.search(sessionId, "SELECT ds.id FROM Dataset ds") #Replace this with whatever JPQL query you like
-print(search)
-ds = icat.get(sessionId, "Dataset", search[0]) #Extract first dataset as an example
-print(ds)
+	return myClient.getPreparedData(preparedId)
 
-#Use Python-ICAT to download data:
-idsURL = #Your IDS URL here
-myClient = IDSClient(idsURL, sessionId)
+	
+#Login:
+myClient = Client("https://icat02.diamond.ac.uk/ICATService/ICAT?wsdl") #ICAT SOAP WSDL URL
+credentials = {"username":"", "password":""} #Insert username and password
+myClient.login("ldap", credentials)
+myClient.add_ids("https://ids01.diamond.ac.uk/ids") #IDS URL
+
+#Find all visit IDs:
+visitIds = myClient.search("SELECT i.visitId FROM Investigation i")
+print("Visit IDs found:")
+print(visitIds)
+
+#For each visit ID, list all datasets and metadata and download:
+for vid in visitIds:
+
+	#Get dataset IDs:
+	datasetIdQuery = "SELECT ds.id FROM Dataset ds WHERE ds.investigation.visitId=" + "'" + vid + "'"
+	datasetIds = myClient.search(datasetIdQuery)
+	print("Dataset IDs found:")
+	print(datasetIds)
+
+	#Get dataset metadata:
+	print("Dataset metadata:")
+	datasetMetaQuery = "SELECT ds FROM Dataset ds WHERE ds.investigation.visitId=" + "'" + vid + "'"
+	datasetMetadata = myClient.search(datasetMetaQuery )
+	print(datasetMetadata)
+	print("Downloading datasets for this visit ID...")
+
+	#Download all datasets for the visit ID:
+	for i in range(0, len(datasetIds) - 1):
+		getDataResp = downloadDataset(datasetIds[i])
+
+		#I have tried several methods to save the dataset, none of which work. It produces gibberish rather than a zip file. The request returns a file-like object, which is different from what the requests library returns:
+		'''
+		z = zipfile.ZipFile(StringIO.StringIO(getDataResp.content)) #Store as zip file
+		z.extractall() #Extract zip file
+
+		with open("code2.zip", "wb") as code:
+		    code.write(myData.read())
+
+		with open("myData.out", 'wb') as f:
+            		copyfile(myData, f)
+
+		'''		
+		print("Data downloaded to local directory")
+
+
+
+
+
